@@ -193,7 +193,6 @@ class OpenTelemetry(CustomLogger):
 
     def _init_tracing(self, tracer_provider):
         from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.trace import SpanKind
 
         # If a global SDK TracerProvider is already set (e.g., by tests or host app),
