@@ -496,6 +496,7 @@ const sidebars = {
         "completion/provider_specific_params",
         "guides/finetuned_models",
         "guides/security_settings",
+        "guides/parallel_acompletions",
         "completion/audio",
         "completion/image_generation_chat",
         "completion/web_search",
