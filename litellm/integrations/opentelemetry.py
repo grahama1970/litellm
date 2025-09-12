@@ -196,14 +196,27 @@ class OpenTelemetry(CustomLogger):
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.trace import SpanKind
 
-        # use provided tracer or create a new one
-        if tracer_provider is None:
-            tracer_provider = TracerProvider(resource=_get_litellm_resource())
-            # Only add OTLP span processor if we created the tracer provider ourselves
-            tracer_provider.add_span_processor(self._get_span_processor())
+        # If a global SDK TracerProvider is already set (e.g., by tests or host app),
+        # respect it and do not overwrite. This avoids breaking in-memory/exporter setups
+        # like the OpenTelemetry unit test which installs its own provider.
+        existing_provider = trace.get_tracer_provider()
 
-        # register global provider and grab our tracer
-        trace.set_tracer_provider(tracer_provider)
+        use_existing = (
+            tracer_provider is None
+            and existing_provider is not None
+            and isinstance(existing_provider, TracerProvider)
+        )
+
+        if use_existing:
+            provider_to_use = existing_provider
+        elif tracer_provider is None:
+            provider_to_use = TracerProvider(resource=_get_litellm_resource())
+            provider_to_use.add_span_processor(self._get_span_processor())
+            trace.set_tracer_provider(provider_to_use)
+        else:
+            provider_to_use = tracer_provider
+            trace.set_tracer_provider(provider_to_use)
+
         self.tracer = trace.get_tracer(LITELLM_TRACER_NAME)
         self.span_kind = SpanKind
 
