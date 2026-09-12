@@ -37,6 +37,62 @@ def _is_done_chunk(chunk: str | bytes) -> bool:
     return "data: [DONE]" in text
 
 
+async def renumber_tool_call_deltas(raw: Any) -> Any:
+    """Rewrite gpt-5.6 split-index tool_call deltas in a raw OAuth SSE stream.
+
+    The upstream emits the id+name delta at one tool_calls index and the
+    argument fragments at another; merge-by-index clients then assemble two
+    broken calls. This pass renumbers identity-less argument fragments onto
+    the most recent identity-bearing call, leaving every other byte intact.
+    Mirrors the fix in ``_sse_generator`` for the raw-byte OAuth path.
+    """
+    import json as _json
+
+    last_identity_index: int | None = None
+    carry = ""
+
+    async for chunk in raw:
+        text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, (bytes, bytearray)) else chunk
+        carry += text
+        parts = carry.split("\n\n")
+        carry = parts.pop()
+        for event in parts:
+            if not event.strip():
+                continue
+            lines = event.splitlines()
+            out_lines = []
+            for line in lines:
+                if line.startswith("data: ") and line[6:].strip().startswith("{"):
+                    try:
+                        payload = _json.loads(line[6:])
+                    except Exception:
+                        out_lines.append(line)
+                        continue
+                    if isinstance(payload, dict):
+                        for choice in payload.get("choices") or []:
+                            delta = choice.get("delta") if isinstance(choice, dict) else None
+                            if not isinstance(delta, dict):
+                                continue
+                            for tc in delta.get("tool_calls") or []:
+                                if not isinstance(tc, dict):
+                                    continue
+                                fn = tc.get("function") or {}
+                                if tc.get("id") or fn.get("name"):
+                                    last_identity_index = tc.get("index", 0)
+                                elif (
+                                    last_identity_index is not None
+                                    and fn.get("arguments")
+                                    and tc.get("index") != last_identity_index
+                                ):
+                                    tc["index"] = last_identity_index
+                    out_lines.append("data: " + _json.dumps(payload))
+                else:
+                    out_lines.append(line)
+            yield "\n".join(out_lines) + "\n\n"
+    if carry.strip():
+        yield carry
+
+
 async def sse_liveness_wrapper(
     stream: AsyncIterator[str] | AsyncIterator[bytes],
     *,

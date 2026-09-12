@@ -124,3 +124,36 @@ def test_forwarder_renumbers_identityless_fragments_onto_open_call() -> None:
                     arg_indices.add(tc.get("index"))
     assert seen_identity_index == 0
     assert arg_indices == {0}, arg_indices
+
+
+def test_raw_oauth_path_renumbers_split_indices() -> None:
+    import json as _json
+    from scillm.proxy.streaming import renumber_tool_call_deltas
+
+    def to_sse(chunks: list[dict[str, Any]]) -> list[bytes]:
+        return [(f"data: {_json.dumps(c)}\n\n").encode() for c in chunks]
+
+    async def gen() -> Any:
+        for b in to_sse(CAPTURED_GPT56_SEQUENCE):
+            yield b
+
+    async def collect() -> list[dict[str, Any]]:
+        out = []
+        async for block in renumber_tool_call_deltas(gen()):
+            for line in block.splitlines():
+                if line.startswith("data: {"):
+                    out.append(_json.loads(line[6:]))
+        return out
+
+    events = asyncio.run(collect())
+    identity_idx = None
+    arg_idx = set()
+    for ev in events:
+        for ch in ev.get("choices") or []:
+            for tc in (ch.get("delta") or {}).get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                if tc.get("id") or fn.get("name"):
+                    identity_idx = tc.get("index")
+                elif fn.get("arguments"):
+                    arg_idx.add(tc.get("index"))
+    assert identity_idx == 0 and arg_idx == {0}, (identity_idx, arg_idx)

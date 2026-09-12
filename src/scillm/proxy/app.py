@@ -44,7 +44,7 @@ from scillm.proxy.providers.claude_models import claude_catalog_payload, static_
 from scillm.proxy.providers.codex_models import codex_catalog_payload, discover_codex_models, resolve_codex_model
 from scillm.proxy.router import Router
 from scillm.proxy.router import ProxyError as RouterProxyError
-from scillm.proxy.streaming import DEFAULT_STREAM_HEARTBEAT_S, SSE_HEADERS, _sse_generator, sse_liveness_wrapper
+from scillm.proxy.streaming import DEFAULT_STREAM_HEARTBEAT_S, SSE_HEADERS, _sse_generator, renumber_tool_call_deltas, sse_liveness_wrapper
 from starlette.responses import StreamingResponse
 
 # ---------------------------------------------------------------------------
@@ -2729,9 +2729,10 @@ async def chat_completions(request: Request):
                 # OAuth providers return AsyncIterator[bytes] (already SSE-formatted).
                 # The openai SDK returns its own async stream type.
                 if hasattr(result, "__aiter__") and not hasattr(result, "response"):
-                    # Raw byte stream from OAuth providers — pipe directly
+                    # Raw byte stream from OAuth providers — pipe directly,
+                    # through the gpt-5.6 tool_call index renumber pass.
                     stream_iter = sse_liveness_wrapper(
-                        result,
+                        renumber_tool_call_deltas(result),
                         model=model,
                         started_at=start,
                         overall_timeout_s=deadline_timeout_s,
