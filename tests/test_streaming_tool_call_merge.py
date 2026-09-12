@@ -94,3 +94,33 @@ def test_fail_before_fix_shape_is_two_split_entries_under_pure_index_merge() -> 
         (not c["function"]["name"]) or (not c["function"]["arguments"])
         for c in result["choices"][0]["message"]["tool_calls"]
     )
+
+
+def test_forwarder_renumbers_identityless_fragments_onto_open_call() -> None:
+    import json as _json
+    from scillm.proxy.streaming import _sse_generator
+
+    async def gen() -> Any:
+        for c in CAPTURED_GPT56_SEQUENCE:
+            yield c
+
+    async def collect_sse() -> list[dict[str, Any]]:
+        out = []
+        async for line in _sse_generator(gen()):
+            if line.startswith("data: {"):
+                out.append(_json.loads(line[len("data: "):]))
+        return out
+
+    events = asyncio.run(collect_sse())
+    seen_identity_index = None
+    arg_indices = set()
+    for ev in events:
+        for ch in ev.get("choices") or []:
+            for tc in (ch.get("delta") or {}).get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                if tc.get("id") or fn.get("name"):
+                    seen_identity_index = tc.get("index")
+                elif fn.get("arguments"):
+                    arg_indices.add(tc.get("index"))
+    assert seen_identity_index == 0
+    assert arg_indices == {0}, arg_indices

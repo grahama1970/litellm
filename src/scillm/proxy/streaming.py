@@ -168,6 +168,12 @@ async def _sse_generator(stream: Any, model: str = "") -> AsyncIterator[str]:
     """
     last_usage: dict[str, Any] = {}
     stream_model: str = model
+    # gpt-5.6 streaming quirk (2026-09-12): id+name delta and argument
+    # fragments can carry different tool_call indices. Renumber identity-less
+    # argument fragments onto the most recent identity-bearing call so any
+    # merge-by-index client (the OpenAI contract, e.g. Pi's tau-scillm
+    # bridge) assembles one well-formed call instead of two broken ones.
+    last_identity_index: int | None = None
     try:
         async for chunk in stream:
             payload = chunk.model_dump() if hasattr(chunk, "model_dump") else chunk
@@ -178,6 +184,18 @@ async def _sse_generator(stream: Any, model: str = "") -> AsyncIterator[str]:
                     last_usage = payload["usage"]
                 if payload.get("model"):
                     stream_model = payload["model"]
+                for choice in payload.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    for tc in delta.get("tool_calls") or []:
+                        fn = tc.get("function") or {}
+                        if tc.get("id") or fn.get("name"):
+                            last_identity_index = tc.get("index", 0)
+                        elif (
+                            last_identity_index is not None
+                            and fn.get("arguments")
+                            and tc.get("index") != last_identity_index
+                        ):
+                            tc["index"] = last_identity_index
             yield f"data: {json.dumps(payload)}\n\n"
     except Exception as exc:
         logger.error("Stream interrupted: {}", exc)
