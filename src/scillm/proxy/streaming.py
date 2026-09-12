@@ -286,6 +286,24 @@ async def collect_response(stream: Any) -> dict[str, Any]:
             # Accumulate tool calls.
             for tc in delta.get("tool_calls") or []:
                 idx = tc.get("index", 0)
+                fn = tc.get("function") or {}
+                # gpt-5.6 streaming quirk (scillm 2026-09-12): the id+name
+                # delta and the argument fragments can carry DIFFERENT
+                # tool_call indices. A delta with no id and no name but with
+                # arguments belongs to the most recent open call, not to a
+                # new call keyed by its renumbered index. Identity-bearing
+                # deltas (id or name) still open new entries, so genuinely
+                # parallel calls are unaffected.
+                has_identity = bool(tc.get("id") or fn.get("name"))
+                if (
+                    not has_identity
+                    and fn.get("arguments")
+                    and tool_calls_by_index
+                ):
+                    tool_calls_by_index[max(tool_calls_by_index)]["function"][
+                        "arguments"
+                    ] += fn["arguments"]
+                    continue
                 if idx not in tool_calls_by_index:
                     tool_calls_by_index[idx] = {
                         "id": tc.get("id", ""),
@@ -293,7 +311,6 @@ async def collect_response(stream: Any) -> dict[str, Any]:
                         "function": {"name": "", "arguments": ""},
                     }
                 entry = tool_calls_by_index[idx]
-                fn = tc.get("function") or {}
                 if fn.get("name"):
                     entry["function"]["name"] = fn["name"]
                 if fn.get("arguments"):
