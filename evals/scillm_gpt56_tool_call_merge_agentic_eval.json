@@ -1,0 +1,137 @@
+{
+  "version": 2,
+  "skill": "scillm",
+  "trials": 3,
+  "proof_scope": "gpt-5.6 split-index tool-call delta fix: deterministic replay of the captured live sequence plus a live streaming request through the running proxy, assembled merge-by-index exactly as Pi's tau-scillm bridge does.",
+  "claims": {
+    "proves": "The captured gpt-5.6 split-index stream and a fresh live gpt-5.6 streaming tool-call request both assemble into exactly one well-formed tool call through the fixed paths.",
+    "does_not_prove": "Provider semantic quality, non-gpt-5.6 models, or Pi-side consumer behavior beyond the merge-by-index contract."
+  },
+  "capability_claims": [
+    {
+      "id": "scillm.gpt56_toolcall_stream_assembly",
+      "description": "gpt-5.6 streamed tool calls with renumbered/split indices are normalized so any merge-by-index consumer assembles one well-formed call.",
+      "criticality": "critical",
+      "evidence_required": {
+        "deterministic": true,
+        "live_e2e": true
+      },
+      "claim_semantics": "protocol"
+    }
+  ],
+  "seams": [
+    {
+      "seam_id": "scillm.gpt56_toolcall.internal_assembly",
+      "seam_type": "pure deterministic transform",
+      "criticality": "critical",
+      "claim_id": "scillm.gpt56_toolcall_stream_assembly",
+      "required_evidence": [
+        "deterministic"
+      ]
+    },
+    {
+      "seam_id": "scillm.gpt56_toolcall.forwarded_sse",
+      "seam_type": "filesystem/process",
+      "criticality": "critical",
+      "claim_id": "scillm.gpt56_toolcall_stream_assembly",
+      "required_evidence": [
+        "live_e2e"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "replay-captured-sequence-one-call",
+      "type": "adversarial",
+      "evidence_class": "deterministic",
+      "real_world": true,
+      "supports_claims": [
+        "scillm.gpt56_toolcall_stream_assembly"
+      ],
+      "seams": [
+        "scillm.gpt56_toolcall.internal_assembly"
+      ],
+      "command": [
+        "bash",
+        "-c",
+        "cd .. && PYTHONPATH=src uv run --project /home/graham/workspace/experiments/agent-skills/skills/ask --with starlette python scripts/agentic-eval-scillm-gpt56-tool-call-merge.py replay"
+      ],
+      "expected": {
+        "exit_code": 0,
+        "stdout_contains": [
+          "REPLAY_PASS"
+        ]
+      },
+      "timeout_seconds": 60
+    },
+    {
+      "name": "live-proxy-stream-assembles-one-call",
+      "type": "positive",
+      "evidence_class": "live_e2e",
+      "real_world": true,
+      "supports_claims": [
+        "scillm.gpt56_toolcall_stream_assembly"
+      ],
+      "seams": [
+        "scillm.gpt56_toolcall.forwarded_sse"
+      ],
+      "command": [
+        "bash",
+        "-c",
+        "cd .. && PYTHONPATH=src uv run --project /home/graham/workspace/experiments/agent-skills/skills/ask python scripts/agentic-eval-scillm-gpt56-tool-call-merge.py live --out evals/gpt56-live-readback.json"
+      ],
+      "expected": {
+        "exit_code": 0,
+        "stdout_contains": [
+          "LIVE_PASS"
+        ],
+        "artifacts": [
+          {
+            "path": "gpt56-live-readback.json",
+            "json_pointer": "/call_count",
+            "equals": 1
+          },
+          {
+            "path": "gpt56-live-readback.json",
+            "json_pointer": "/finish",
+            "equals": "tool_calls"
+          },
+          {
+            "path": "gpt56-live-readback.json",
+            "json_pointer": "/calls/0/function/name",
+            "equals": "read_file"
+          },
+          {
+            "path": "gpt56-live-readback.json",
+            "min_bytes": 64
+          }
+        ]
+      },
+      "timeout_seconds": 180
+    },
+    {
+      "name": "split-shape-fails-when-indices-not-renumbered",
+      "type": "negative",
+      "evidence_class": "deterministic",
+      "real_world": true,
+      "supports_claims": [
+        "scillm.gpt56_toolcall_stream_assembly"
+      ],
+      "seams": [
+        "scillm.gpt56_toolcall.internal_assembly"
+      ],
+      "command": [
+        "bash",
+        "-c",
+        "cd .. && PYTHONPATH=src uv run --project /home/graham/workspace/experiments/agent-skills/skills/ask python -c \"import sys; sys.path.insert(0,'src'); ns={'__file__':'scripts/agentic-eval-scillm-gpt56-tool-call-merge.py'}; src=open('scripts/agentic-eval-scillm-gpt56-tool-call-merge.py').read(); head=src[:src.index('SCILLM_SRC =')]; body=src[src.index('def _chunk'):src.index('def mode_replay')]; exec(head+body, ns); seq=ns['CAPTURED']; by={}; [by.setdefault(tc.get('index',0),{'id':'','name':'','args':''}) for c_ in seq for ch in c_['choices'] for tc in (ch['delta']).get('tool_calls',[])]; print('SPLIT_SHAPE_SEEN' if len(by)==2 else 'UNEXPECTED')\""
+      ],
+      "expected": {
+        "exit_code": 0,
+        "stdout_contains": [
+          "SPLIT_SHAPE_SEEN"
+        ]
+      },
+      "timeout_seconds": 60
+    }
+  ]
+}
